@@ -23,33 +23,76 @@ OR OTHER DEALINGS IN THE SOFTWARE.
 using System;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
+
 namespace Cyrus.Mql5
 {
     public class RestMQL
     {
-        [DllExport("Get", CallingConvention = CallingConvention.StdCall)]
-        [return: MarshalAs(UnmanagedType.LPTStr)]
-        public static string Get([In, MarshalAs(UnmanagedType.LPTStr)] string url)
+        private static readonly HttpClient _httpClient = new HttpClient
         {
-            using (var httpClient = new HttpClient())
-            {
-                var response = httpClient.GetStringAsync(new Uri(url)).Result;
+            Timeout = TimeSpan.FromSeconds(10)
+        };
 
-                return response;
+
+        [DllExport("Get", CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.LPWStr)]
+        public static string Get([In, MarshalAs(UnmanagedType.LPWStr)] string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return "Error|URL cannot be null or empty";
+            
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    string result = httpClient.GetStringAsync(new Uri(url)).GetAwaiter().GetResult();
+                    return Marshal.StringToHGlobalUni(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                return Marshal.StringToHGlobalUni($"Error: {ex.Message}");
             }
         }
 
         [DllExport("Post", CallingConvention = CallingConvention.StdCall)]
-        [return: MarshalAs(UnmanagedType.LPTStr)]
-        public static string Post([In, MarshalAs(UnmanagedType.LPTStr)] string url, [In, MarshalAs(UnmanagedType.LPTStr)] string data)
+        [return: MarshalAs(UnmanagedType.LPWStr)]
+        public static string Post([In, MarshalAs(UnmanagedType.LPWStr)] string url, [In, MarshalAs(UnmanagedType.LPWStr)] string data)
         {
+            if (string.IsNullOrWhiteSpace(url))
+                return "Error|URL cannot be null or empty";
+
+            if (data == null)
+                return "Error|Data cannot be null";
+
             using (var httpClient = new HttpClient())
             {
-
-               var response = httpClient.PostAsync(new Uri(url), new StringContent(data));
-
-               return response.Result.Content.ReadAsStringAsync().Result;
+                try
+                {
+                    var content = new StringContent(data, System.Text.Encoding.UTF8, "application/json");
+                    var response = httpClient.PostAsync(new Uri(url), content).GetAwaiter().GetResult();
+                    response.EnsureSuccessStatusCode();
+                    return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                }
+                catch (UriFormatException ex)
+                {
+                    return $"Error|Invalid URL: {ex.Message}";
+                }
+                catch (HttpRequestException ex)
+                {
+                    return $"Error|HTTP Error: {ex.Message}";
+                }
+                catch (Exception ex)
+                {
+                    return $"Error|Unexpected Error: {ex.Message}";
+                }
             }
+        }
+        
+        public static void Dispose()
+        {
+            _httpClient?.Dispose();
         }
     }
 }
